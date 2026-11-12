@@ -540,7 +540,8 @@ mod tests {
         // The phone turns it off; the agent sees that.
         let mut off = v["alarms"][0].clone();
         off["enabled"] = json!(false);
-        off["at"] = json!(now_ms());
+        // Later than the agent's add, even within the same millisecond.
+        off["at"] = json!(now_ms() + 1);
         let (_, v) = call(&db, "POST", "/sync", Some(json!({ "since": seq, "alarms": [off] }))).await;
         let seq = v["seq"].as_i64().unwrap();
         let (_, v) = call(&db, "GET", "/alarms", None).await;
