@@ -540,8 +540,10 @@ mod tests {
         // The phone turns it off; the agent sees that.
         let mut off = v["alarms"][0].clone();
         off["enabled"] = json!(false);
-        // Later than the agent's add, even within the same millisecond.
-        off["at"] = json!(now_ms() + 1);
+        // Later than the agent's add: the server caps a change's time at
+        // its own now, so a same-millisecond change would tie and lose.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        off["at"] = json!(now_ms());
         let (_, v) = call(&db, "POST", "/sync", Some(json!({ "since": seq, "alarms": [off] }))).await;
         let seq = v["seq"].as_i64().unwrap();
         let (_, v) = call(&db, "GET", "/alarms", None).await;
