@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+*.keystore
+*.jks
+.idea/
+.kotlin/
+server/target/
+screenshots/sounds/
