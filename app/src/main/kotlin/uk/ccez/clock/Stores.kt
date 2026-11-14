@@ -163,14 +163,16 @@ class AlarmStore(dir: File, private val log: ClockLog) {
      * its copy is taken whenever this phone owes it nothing for that alarm
      * (the server's clock stamps `at`, so a phone clock running ahead can't
      * keep an agent's later change out). An alarm changed here and not yet
-     * sent is only replaced by a newer one. Returns how many changed here.
+     * sent is only replaced by a newer one. With [serverSettled] false (the
+     * server's database was made anew, maybe from an older copy), nothing
+     * was settled: only a newer copy is taken. Returns how many changed here.
      */
-    fun applyRemote(remote: List<Alarm>): Int {
+    fun applyRemote(remote: List<Alarm>, serverSettled: Boolean = true): Int {
         var n = 0
         synchronized(this) {
             for (r in remote) {
                 val mine = all[r.id]
-                val take = mine == null || r.at > mine.at || (r.id !in dirty && r != mine)
+                val take = mine == null || r.at > mine.at || (serverSettled && r.id !in dirty && r != mine)
                 if (take) {
                     all[r.id] = r
                     dirty -= r.id

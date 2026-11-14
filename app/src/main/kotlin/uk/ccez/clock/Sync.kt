@@ -89,10 +89,12 @@ object Sync {
                     runCatching { Alarm.parse(got.getJSONObject(i)) }
                         .onFailure { app.log.log("warn", "sync-bad-alarm", "error" to it.toString()) }.getOrNull()
                 }
-                val changed = app.alarms.applyRemote(remote)
-                res.optJSONObject("timer")?.let { t -> runCatching { app.timer.applyRemote(TimerState.parse(t)) } }
                 val db = res.optLong("db", 0)
-                if (SyncCursor.newDatabase(prefs.getLong("db", 0), db)) {
+                val newDb = SyncCursor.newDatabase(prefs.getLong("db", 0), db)
+                // A database made anew may be an older copy: its alarms win only where newer.
+                val changed = app.alarms.applyRemote(remote, serverSettled = !newDb)
+                res.optJSONObject("timer")?.let { t -> runCatching { app.timer.applyRemote(TimerState.parse(t)) } }
+                if (newDb) {
                     // The server's database was made anew: its count starts again
                     // below this phone's cursor, and it has lost this phone's alarms.
                     app.log.log("warn", "sync-new-server-db", "was" to prefs.getLong("db", 0), "now" to db, "seq" to since)
