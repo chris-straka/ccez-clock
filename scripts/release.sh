@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 [ -z "$(git status --porcelain)" ] || { echo "commit first" >&2; exit 1; }
 # The SDK, before any gradle call: local.properties, else ANDROID_HOME,
 # else where Android Studio puts it (a fresh clone has neither file nor variable).
-SDK="${ANDROID_HOME:-$(sed -n 's/^sdk.dir=//p' local.properties 2>/dev/null)}"
+SDK="${ANDROID_HOME:-$(sed -n 's/^sdk.dir=//p' local.properties 2>/dev/null || true)}"
 export ANDROID_HOME="${SDK:-$HOME/Library/Android/sdk}"
 (cd server && cargo test -q)
 ./gradlew --console=plain -q :app:testDebugUnitTest
