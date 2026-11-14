@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# Builds the release APK, signed with the key in ~/.config/ccez-clock (made
-# once here, never regenerated: a new key means uninstalling the app and
-# its alarms), and installs it when a device is named.
+# Builds the release APK, signed with the key in ~/.config/ccez-clock, and
+# installs it when a device is named. The key is made once, with
+# --new-key, and never again: a new key means the phone can't update and
+# must uninstall the app (and its alarms). Without the key, this stops.
 #   scripts/build.sh                            build only
 #   CLOCK_SERIAL=<adb serial> scripts/build.sh  build + install there
+#   scripts/build.sh --new-key                  first time on a new setup only
 set -euo pipefail
 cd "$(dirname "$0")/.."
 KEYDIR="$HOME/.config/ccez-clock"
-mkdir -p "$KEYDIR"
-chmod 700 "$KEYDIR"
 if [ ! -f "$KEYDIR/release.jks" ]; then
+  if [ "${1:-}" != "--new-key" ]; then
+    echo "no signing key at $KEYDIR/release.jks: restore it from a backup." >&2
+    echo "Only if no release was ever installed anywhere: scripts/build.sh --new-key" >&2
+    exit 1
+  fi
+  mkdir -p "$KEYDIR"
+  chmod 700 "$KEYDIR"
   PASS="$(openssl rand -base64 24)"
   printf '%s' "$PASS" > "$KEYDIR/password"
   chmod 600 "$KEYDIR/password"
@@ -17,6 +24,11 @@ if [ ! -f "$KEYDIR/release.jks" ]; then
     -keyalg RSA -keysize 4096 -validity 10000 \
     -storepass "$PASS" -keypass "$PASS" -dname "CN=ccez-clock" >/dev/null 2>&1
   echo "made the signing key in $KEYDIR (back it up; never regenerate it)"
+fi
+chmod 600 "$KEYDIR/release.jks" "$KEYDIR/password"
+# The SDK: local.properties, else ANDROID_HOME, else where Android Studio puts it.
+if [ ! -f local.properties ] && [ -z "${ANDROID_HOME:-}" ]; then
+  export ANDROID_HOME="$HOME/Library/Android/sdk"
 fi
 export CCEZ_CLOCK_KEYSTORE="$KEYDIR/release.jks"
 export CCEZ_CLOCK_KEY_PASSWORD="$(cat "$KEYDIR/password")"
