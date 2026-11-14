@@ -25,10 +25,12 @@ the spec; update it as you learn.
 - Verify on the emulator only (`clock_avd`, port 5564, `-no-window
   -no-audio`; `adb -s emulator-5564`). Never the owner's phone unless the
   owner asks that turn. Tests stay silent.
-- Releases: private repo `chris-straka/ccez-clock`, signed APK per release
+- Releases: public repo `chris-straka/ccez-clock`, signed APK per release
   from `scripts/release.sh` (key in `~/.config/ccez-clock/`, made once by
-  `scripts/build.sh`, never regenerated). Self-update from GitHub releases,
-  off unless `updates.self` is set. No GitHub Actions.
+  `scripts/build.sh --new-key`; build.sh stops without it, and release.sh
+  refuses an APK whose certificate differs from the last release's).
+  Self-update from GitHub releases (no token: the repo is public), on
+  unless `updates.self` is turned off. No GitHub Actions.
 
 ## Alarms that always ring
 
@@ -42,7 +44,16 @@ the spec; update it as you learn.
   the ring screen (over the lock screen, screen turned on), plays the
   sound on the alarm stream (`USAGE_ALARM`, so Do not disturb lets it
   through by default) with a fade-in, vibrates when the alarm says so, and
-  stops by itself after `alarm.ring_minutes`.
+  goes quiet after `alarm.ring_minutes`.
+- Unanswered, an alarm rings again a snooze later, `alarm.ring_again`
+  times (3) in a row, as Samsung Clock does; only then it counts as
+  dismissed (a one-off turns off). A ring that never ends (the process
+  killed mid-ring) rings again the same way: the retry is saved when the
+  ring starts. Two alarms in the same minute ring as one, both labels
+  shown, one answer for both; an alarm cut short by the timer rings again.
+- Opening the app while something rings brings the ring screen back. The
+  Alarm tab shows a line for any phone check that's off (below), a tap
+  from its fix.
 - A muted alarm stream is raised to `alarm.min_volume` percent while
   ringing and put back after (0 turns this off).
 - Rescheduled on boot (also before the first unlock: data lives in
@@ -52,7 +63,8 @@ the spec; update it as you learn.
 - Next ring: the next matching day at the alarm's local time. Daylight
   saving: a time skipped in spring rings at the same wall time shifted
   past the gap (02:30 → 03:30); a repeated time in autumn rings once, at
-  the first. Snooze is now plus the alarm's snooze length.
+  the first. Snooze is now plus the alarm's snooze length. Moving an
+  alarm (time or days) ends its snooze.
 
 ### What the phone needs (Galaxy S24, One UI 8)
 
@@ -121,7 +133,11 @@ checks and the phone's own settings.
   version, next ring, ringing, health, settings, UTC offset), `POST /sync`
   (the phone's one call). Per alarm the later change wins by `at`, never
   later than its arrival, and a losing change gets the winner sent back
-  (ccez-words' rule).
+  (ccez-words' rule). The phone takes the server's copy of any alarm it
+  owes nothing for (the server stamps times by its own clock, so a phone
+  clock running ahead can't keep an agent's change out). The sync answer
+  names the server's database; when that changes (the file made anew)
+  the phone starts its cursor over and sends every alarm again.
 - CLI: `bun scripts/clock.ts list|add|edit|delete|enable|disable|timer|phone`
   over HTTP (server from `CLOCK_SERVER`, `~/.config/ccez-clock/server`, or
   z's address). `add 07:30 weekdays --label Gym`, `add +20`, `timer 25m`.
@@ -182,6 +198,24 @@ ringtones, Samsung's look.
 
 ## Status
 
+2026-11-14: fixed the review of v0.1.23 (the version on the owner's
+phone). An unanswered alarm now rings again (3 times, a snooze apart)
+instead of counting as dismissed after 10 minutes; a ring killed midway
+rings again too; same-minute alarms ring together; opening the app while
+ringing brings the ring screen back; phone checks that are off show on
+the Alarm tab; moving a snoozed alarm ends the snooze; the server's copy
+wins when the phone owes nothing (clock skew); a recreated server
+database resets the phone's cursor; a late timer rings through an exact
+wake-up; the stopwatch, timer and editor actions are glyphs with spoken
+names; day chips are 56 dp tall; `updates.self` is on by default (an old
+settings file's stored default is dropped once). build.sh makes a key
+only with `--new-key`; release.sh checks the certificate against the
+last release. Verified by unit tests (33) and server tests (8);
+instrumented tests compile but weren't run (no emulator for this pass),
+and nothing was checked on the S24. v0.1.23 has self-update off, so the
+phone needs this release installed once by hand; after that it updates
+itself.
+
 2026-11-12: released v0.1.17 (APK 1,244 KB: R8, en/fr resources only,
 no icon library, sounds synthesized). Verified on clock_avd with
 `scripts/check.sh` (6 server tests, 20 unit tests, 9 instrumented tests:
@@ -192,11 +226,8 @@ over the off screen after the periodic sync job; its dismiss showed in
 `clock list`). Also by hand: an agent's alarm arriving in forced deep
 Doze through the sync wake-up; alarms rescheduled on locked boot and
 boot. The server's test data was cleared after (backup in
-`~/.ccez-clock/`). Not installed on the owner's phone.
+`~/.ccez-clock/`).
 Not verified: anything on the S24 (One UI's sleeping apps, the real
 alarm sound and its fade, vibration); the sounds have been checked by
 numbers only (level, length, clean loop): they need a listen
-(`scripts/sounds.sh`). Self-update reads the latest release through the
-GitHub API, which needs a token for this private repo (as ccez-launcher
-does today): off by default, so nothing breaks; add a read-only token
-the way ccez-tube does when it's wanted.
+(`scripts/sounds.sh`).
