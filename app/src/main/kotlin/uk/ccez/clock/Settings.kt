@@ -180,23 +180,53 @@ class ClockSettings(dir: File, private val log: ClockLog) {
         val text = runCatching { file.readText() }.getOrNull() ?: return
         val o = runCatching { JSONObject(text) }.getOrNull() ?: return log.log("warn", "settings-bad-file")
         for (d in SettingDefs.ALL) if (o.has(d.key)) runCatching { values[d.key] = SettingDefs.checked(d, o.get(d.key)) }
-        // Files before format 2 held every default, not only what was set:
-        // updates.self=false there was the old default, not a choice.
-        if (o.optInt(FORMAT, 1) < 2 && values["updates.self"] == false) {
-            values.remove("updates.self")
-            log.log("info", "settings-migrated", "dropped" to "updates.self")
+        val format = o.optInt(FORMAT, 1)
+        if (format < FORMAT_NOW) {
+            val dropped = migrated(values, format)
+            log.log("info", "settings-migrated", "from" to format, "dropped" to dropped.joinToString())
             save()
         }
     }
 
     /** Only what was set, so a changed default reaches the phone. */
     @Synchronized private fun save() {
-        val o = JSONObject().put(FORMAT, 2)
+        val o = JSONObject().put(FORMAT, FORMAT_NOW)
         for (d in SettingDefs.ALL) values[d.key]?.let { o.put(d.key, it) }
         writeSafely(file, o.toString(2))
     }
 
-    private companion object {
-        const val FORMAT = "_format"
+    companion object {
+        private const val FORMAT = "_format"
+        private const val FORMAT_NOW = 3
+
+        /**
+         * The defaults as v0.1.23 wrote them. Format 1 files (up to v0.1.23)
+         * held every setting, defaults too; v0.1.29 (format 2) kept those
+         * old defaults as if chosen. sync.server isn't here: its default
+         * came from the build, so a stored one is always kept.
+         */
+        private val FORMAT1_DEFAULTS: Map<String, Any> = mapOf(
+            "alarm.sound" to "chimes", "alarm.fade_seconds" to 30, "alarm.vibrate" to true,
+            "alarm.snooze_minutes" to 10, "alarm.ring_minutes" to 10, "alarm.min_volume" to 40,
+            "timer.sound" to "marimba", "timer.presets" to "1,3,5,10,15,30", "sync.device" to "",
+            "sync.minutes" to 30, "updates.self" to false,
+        )
+
+        /**
+         * Drops from [values] what an older file stored only because it was
+         * the default then, so later default changes reach the phone; returns
+         * the keys dropped. A value set to the default by hand is dropped too:
+         * it reads the same now, and follows the default from here on. In a
+         * format 2 file a value is dropped only if it's today's default as
+         * well (updates.self=false there was turned off by hand).
+         */
+        internal fun migrated(values: MutableMap<String, Any>, format: Int): List<String> {
+            val dropped = values.keys.filter { k ->
+                val old = FORMAT1_DEFAULTS[k] ?: return@filter false
+                values[k] == old && (format < 2 || SettingDefs.def(k)?.default == old)
+            }
+            dropped.forEach { values.remove(it) }
+            return dropped
+        }
     }
 }
