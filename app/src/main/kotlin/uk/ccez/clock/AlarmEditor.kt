@@ -119,15 +119,13 @@ import java.util.Locale
             ValueRow("Snooze", "$snooze min", { dialog = "snooze" }, Modifier.testTag("snooze"))
             if (old != null) {
                 Gap(8)
-                TextButton(onClick = { app.alarms.delete(old.id); onDone() }, modifier = Modifier.defaultMinSize(minHeight = 56.dp).testTag("delete")) {
-                    Text("Delete", color = Palette.dim, fontSize = 17.sp)
-                }
+                GlyphButton(Glyph.DELETE, "Delete alarm", { app.alarms.delete(old.id); onDone() }, Modifier.testTag("delete"), color = Palette.dim)
             }
             Gap(16)
         }
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Pill("Cancel", onDone, Modifier.weight(1f).testTag("cancel"))
-            Pill("Save", { app.alarms.put(draft, if (old == null) "add" else "edit"); onDone() }, Modifier.weight(1f).testTag("save"), filled = true)
+            Pill(Glyph.CLOSE, "Cancel", onDone, Modifier.weight(1f).testTag("cancel"))
+            Pill(Glyph.CHECK, "Save", { app.alarms.put(draft, if (old == null) "add" else "edit"); onDone() }, Modifier.weight(1f).testTag("save"), filled = true)
         }
     }
 
@@ -151,16 +149,15 @@ import java.util.Locale
 /** Seven round day buttons in the locale's week order; none on: rings once. */
 @Composable fun DaysRow(days: Set<DayOfWeek>, onChange: (Set<DayOfWeek>) -> Unit) {
     val locale = Locale.getDefault()
-    Row(Modifier.fillMaxWidth().testTag("days"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    // Each day's tap area is its whole seventh of the row (no gaps), 56 dp
+    // tall, with the circle drawn inside it.
+    Row(Modifier.fillMaxWidth().testTag("days")) {
         for (d in Schedule.weekOrder(locale)) {
             val on = d in days
             Box(
                 Modifier
                     .weight(1f)
-                    .aspectRatio(1f)
-                    .defaultMinSize(40.dp, 40.dp)
-                    .clip(CircleShape)
-                    .background(if (on) Palette.fg else Palette.cell)
+                    .defaultMinSize(minHeight = 56.dp)
                     .clickable(role = Role.Checkbox) { onChange(if (on) days - d else days + d) }
                     .semantics {
                         contentDescription = d.getDisplayName(TextStyle.FULL, locale)
@@ -169,7 +166,12 @@ import java.util.Locale
                     .testTag("day-${Days.code(d)}"),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(d.getDisplayName(TextStyle.NARROW, locale), color = if (on) Color.Black else Palette.fg, fontSize = 16.sp, maxLines = 1)
+                Box(
+                    Modifier.fillMaxWidth(0.92f).aspectRatio(1f).clip(CircleShape).background(if (on) Palette.fg else Palette.cell),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(d.getDisplayName(TextStyle.NARROW, locale), color = if (on) Color.Black else Palette.fg, fontSize = 16.sp, maxLines = 1)
+                }
             }
         }
     }

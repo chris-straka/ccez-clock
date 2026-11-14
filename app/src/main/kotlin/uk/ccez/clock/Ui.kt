@@ -16,9 +16,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -94,10 +101,62 @@ val Tabular = TextStyle(fontFeatureSettings = "tnum")
     )
 }
 
-enum class Glyph { PLUS, MORE, BACK }
+/** Action glyphs, drawn by hand (no icon library: a small APK). Each button names itself for TalkBack. */
+enum class Glyph { PLUS, MORE, BACK, PLAY, PAUSE, RESET, LAP, CLOSE, CHECK, DELETE }
 
-/** A 48 dp+ icon button with a hand-drawn glyph (no icon library: a small APK). */
-@Composable fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+/** Draws [glyph] in [color], filling this square canvas. */
+fun DrawScope.glyph(glyph: Glyph, color: Color) {
+    val w = size.width
+    val stroke = w * 0.092f
+    fun line(x1: Float, y1: Float, x2: Float, y2: Float) = drawLine(color, Offset(w * x1, w * y1), Offset(w * x2, w * y2), stroke, StrokeCap.Round)
+    val thin = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    when (glyph) {
+        Glyph.PLUS -> { line(0.5f, 0.12f, 0.5f, 0.88f); line(0.12f, 0.5f, 0.88f, 0.5f) }
+        Glyph.MORE -> for (y in listOf(0.2f, 0.5f, 0.8f)) drawCircle(color, w * 0.083f, Offset(w / 2, w * y))
+        Glyph.BACK -> { line(0.15f, 0.5f, 0.85f, 0.5f); line(0.15f, 0.5f, 0.45f, 0.2f); line(0.15f, 0.5f, 0.45f, 0.8f) }
+        Glyph.PLAY -> drawPath(
+            Path().apply { moveTo(w * 0.28f, w * 0.14f); lineTo(w * 0.86f, w * 0.5f); lineTo(w * 0.28f, w * 0.86f); close() },
+            color,
+            style = Fill,
+        )
+        Glyph.PAUSE -> {
+            drawRoundRect(color, Offset(w * 0.22f, w * 0.14f), Size(w * 0.18f, w * 0.72f), CornerRadius(w * 0.05f))
+            drawRoundRect(color, Offset(w * 0.6f, w * 0.14f), Size(w * 0.18f, w * 0.72f), CornerRadius(w * 0.05f))
+        }
+        Glyph.RESET -> {
+            // An open circle with an arrowhead at its top end: start over.
+            drawArc(color, -60f, 300f, false, Offset(w * 0.14f, w * 0.14f), Size(w * 0.72f, w * 0.72f), style = thin)
+            line(0.68f, 0.19f, 0.78f, 0.05f)
+            line(0.68f, 0.19f, 0.86f, 0.27f)
+        }
+        Glyph.LAP -> {
+            // A flag on a pole.
+            line(0.24f, 0.1f, 0.24f, 0.9f)
+            drawPath(
+                Path().apply { moveTo(w * 0.24f, w * 0.12f); lineTo(w * 0.84f, w * 0.3f); lineTo(w * 0.24f, w * 0.5f); close() },
+                color,
+                style = Fill,
+            )
+        }
+        Glyph.CLOSE -> { line(0.18f, 0.18f, 0.82f, 0.82f); line(0.82f, 0.18f, 0.18f, 0.82f) }
+        Glyph.CHECK -> { line(0.12f, 0.54f, 0.4f, 0.8f); line(0.4f, 0.8f, 0.88f, 0.22f) }
+        Glyph.DELETE -> {
+            // A bin: lid, handle, body with two ribs.
+            line(0.12f, 0.24f, 0.88f, 0.24f)
+            line(0.38f, 0.1f, 0.62f, 0.1f)
+            drawPath(
+                Path().apply { moveTo(w * 0.22f, w * 0.24f); lineTo(w * 0.28f, w * 0.9f); lineTo(w * 0.72f, w * 0.9f); lineTo(w * 0.78f, w * 0.24f) },
+                color,
+                style = thin,
+            )
+            line(0.42f, 0.4f, 0.42f, 0.74f)
+            line(0.58f, 0.4f, 0.58f, 0.74f)
+        }
+    }
+}
+
+/** A 56 dp icon button with a hand-drawn glyph; [label] is its spoken name. */
+@Composable fun GlyphButton(glyph: Glyph, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = Palette.fg) {
     Box(
         modifier
             .defaultMinSize(56.dp, 56.dp)
@@ -106,23 +165,36 @@ enum class Glyph { PLUS, MORE, BACK }
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(24.dp)) {
-            val w = size.width
-            val stroke = 2.2.dp.toPx()
-            val c = Palette.fg
-            when (glyph) {
-                Glyph.PLUS -> {
-                    drawLine(c, Offset(w / 2, w * 0.12f), Offset(w / 2, w * 0.88f), stroke, StrokeCap.Round)
-                    drawLine(c, Offset(w * 0.12f, w / 2), Offset(w * 0.88f, w / 2), stroke, StrokeCap.Round)
-                }
-                Glyph.MORE -> for (y in listOf(0.2f, 0.5f, 0.8f)) drawCircle(c, 2.dp.toPx(), Offset(w / 2, w * y))
-                Glyph.BACK -> {
-                    drawLine(c, Offset(w * 0.15f, w / 2), Offset(w * 0.85f, w / 2), stroke, StrokeCap.Round)
-                    drawLine(c, Offset(w * 0.15f, w / 2), Offset(w * 0.45f, w * 0.2f), stroke, StrokeCap.Round)
-                    drawLine(c, Offset(w * 0.15f, w / 2), Offset(w * 0.45f, w * 0.8f), stroke, StrokeCap.Round)
-                }
-            }
-        }
+        Canvas(Modifier.size(24.dp)) { glyph(glyph, color) }
+    }
+}
+
+/** A big pill button showing a glyph; [label] is its spoken name. */
+@Composable fun Pill(
+    glyph: Glyph,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    filled: Boolean = false,
+    enabled: Boolean = true,
+    height: Dp = 64.dp,
+) {
+    val shape = RoundedCornerShape(height / 2)
+    val color = when {
+        !enabled -> Palette.faint
+        filled -> Color.Black
+        else -> Palette.fg
+    }
+    Box(
+        modifier
+            .defaultMinSize(minHeight = height, minWidth = 96.dp)
+            .clip(shape)
+            .then(if (filled) Modifier.background(if (enabled) Palette.fg else Palette.line) else Modifier.border(1.5.dp, if (enabled) Palette.faint else Palette.line, shape))
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(28.dp)) { glyph(glyph, color) }
     }
 }
 

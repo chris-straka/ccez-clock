@@ -85,14 +85,14 @@ private fun sw() = Triple(App.elapsed(), System.currentTimeMillis(), App.bootCou
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             when {
                 s.running -> {
-                    Pill("Lap", { val (e, w, b) = sw(); store.update { it.lap(e, w, b) } }, Modifier.weight(1f).testTag("lap"))
-                    Pill("Stop", { val (e, w, b) = sw(); store.update { it.stop(e, w, b) } }, Modifier.weight(1f).testTag("stop"), filled = true)
+                    Pill(Glyph.LAP, "Lap", { val (e, w, b) = sw(); store.update { it.lap(e, w, b) } }, Modifier.weight(1f).testTag("lap"))
+                    Pill(Glyph.PAUSE, "Stop", { val (e, w, b) = sw(); store.update { it.stop(e, w, b) } }, Modifier.weight(1f).testTag("stop"), filled = true)
                 }
                 started -> {
-                    Pill("Reset", { store.update { it.reset() } }, Modifier.weight(1f).testTag("reset"))
-                    Pill("Resume", { val (e, w, b) = sw(); store.update { it.start(e, w, b) } }, Modifier.weight(1f).testTag("start"), filled = true)
+                    Pill(Glyph.RESET, "Reset", { store.update { it.reset() } }, Modifier.weight(1f).testTag("reset"))
+                    Pill(Glyph.PLAY, "Resume", { val (e, w, b) = sw(); store.update { it.start(e, w, b) } }, Modifier.weight(1f).testTag("start"), filled = true)
                 }
-                else -> Pill("Start", { val (e, w, b) = sw(); store.update { it.start(e, w, b) } }, Modifier.weight(1f).testTag("start"), filled = true)
+                else -> Pill(Glyph.PLAY, "Start", { val (e, w, b) = sw(); store.update { it.start(e, w, b) } }, Modifier.weight(1f).testTag("start"), filled = true)
             }
         }
     }
@@ -165,6 +165,7 @@ private fun sw() = Triple(App.elapsed(), System.currentTimeMillis(), App.bootCou
             }
         }
         Pill(
+            Glyph.PLAY,
             "Start",
             { app.timer.update("start") { s, n -> s.start(ms, n) }; digits = "" },
             Modifier.fillMaxWidth().padding(top = 8.dp).testTag("timer-start"),
@@ -201,9 +202,9 @@ private fun sw() = Triple(App.elapsed(), System.currentTimeMillis(), App.bootCou
         }
         Pill("+1 min", { app.timer.update("plus-minute") { s, n -> s.addMinute(n) } }, Modifier.padding(bottom = 12.dp).testTag("timer-add"), height = 52.dp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Pill("Cancel", { app.timer.update("cancel") { s, n -> s.cancel(n) } }, Modifier.weight(1f).testTag("timer-cancel"))
-            if (t.running) Pill("Pause", { app.timer.update("pause") { s, n -> s.pause(n) } }, Modifier.weight(1f).testTag("timer-pause"), filled = true)
-            else Pill("Resume", { app.timer.update("resume") { s, n -> s.resume(n) } }, Modifier.weight(1f).testTag("timer-resume"), filled = true)
+            Pill(Glyph.CLOSE, "Cancel timer", { app.timer.update("cancel") { s, n -> s.cancel(n) } }, Modifier.weight(1f).testTag("timer-cancel"))
+            if (t.running) Pill(Glyph.PAUSE, "Pause", { app.timer.update("pause") { s, n -> s.pause(n) } }, Modifier.weight(1f).testTag("timer-pause"), filled = true)
+            else Pill(Glyph.PLAY, "Resume", { app.timer.update("resume") { s, n -> s.resume(n) } }, Modifier.weight(1f).testTag("timer-resume"), filled = true)
         }
     }
 }
