@@ -74,6 +74,7 @@ object Scheduler {
         }
         for (gone in before - set) am(ctx).cancel(alarmIntent(ctx, gone))
         prefs.edit().putStringSet("ids", set).apply()
+        Notifications.showSnoozes(ctx, app.alarms.shownSnoozes(RingService.now.value?.alarmIds.orEmpty(), System.currentTimeMillis()))
 
         // The next server sync wake-up: 3 min before the next ring (a moved or
         // cancelled alarm is honoured) or every sync.minutes (an agent's new
@@ -163,9 +164,11 @@ class AlarmReceiver : BroadcastReceiver() {
             }
             Notifications.ACTION_SNOOZE_DISMISS -> {
                 val id = intent.getStringExtra(Scheduler.EXTRA_ID) ?: return
-                app.log.log("info", "snooze-dismissed", "id" to id)
-                Notifications.cancelSnoozed(ctx, id)
-                app.alarms.rang(id)
+                val until = intent.getLongExtra(Notifications.EXTRA_UNTIL, -1)
+                val ended = app.alarms.dismissSnooze(id, until)
+                app.log.log("info", if (ended) "snooze-dismissed" else "snooze-dismiss-stale", "id" to id, "until" to until)
+                // A stale button: the shade catches up with the store.
+                if (!ended) Scheduler.scheduleAll(ctx, "snooze-dismiss-stale")
             }
             Notifications.ACTION_TIMER_PAUSE -> app.timer.update("pause") { s, n -> s.pause(n) }
             Notifications.ACTION_TIMER_RESUME -> app.timer.update("resume") { s, n -> s.resume(n) }

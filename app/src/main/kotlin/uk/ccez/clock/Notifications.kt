@@ -14,6 +14,8 @@ import java.time.ZoneId
 object Notifications {
     const val RING_ID = 1
     private const val TIMER_ID = 2
+    private const val SNOOZED_ID = 3
+    const val EXTRA_UNTIL = "until"
     private const val RING = "ring"
     private const val TIMER = "timer"
     private const val SNOOZED = "snoozed"
@@ -42,9 +44,10 @@ object Notifications {
     private fun service(ctx: Context, action: String): PendingIntent =
         PendingIntent.getService(ctx, action.hashCode(), Intent(ctx, RingService::class.java).setAction(action), flags())
 
-    private fun broadcast(ctx: Context, action: String, id: String? = null): PendingIntent {
+    private fun broadcast(ctx: Context, action: String, id: String? = null, until: Long? = null): PendingIntent {
         val i = Intent(ctx, AlarmReceiver::class.java).setAction(action)
         if (id != null) i.setData(Uri.parse("ccez-clock://alarm/$id")).putExtra(Scheduler.EXTRA_ID, id)
+        if (until != null) i.putExtra(EXTRA_UNTIL, until)
         return PendingIntent.getBroadcast(ctx, 0, i, flags())
     }
 
@@ -88,19 +91,43 @@ object Notifications {
     fun quiet(ctx: Context): Notification = Notification.Builder(ctx, SNOOZED)
         .setSmallIcon(R.drawable.ic_notify).setContentTitle("Clock").build()
 
-    fun snoozed(ctx: Context, a: Alarm, until: Long) {
-        val n = Notification.Builder(ctx, SNOOZED)
+    /**
+     * The "Snoozed until" lines follow the store (Scheduler.scheduleAll
+     * calls this on every change): one per snooze shown, and any other
+     * taken down: when the snooze rings, the alarm is dismissed or moved,
+     * or its re-rings run out.
+     */
+    fun showSnoozes(ctx: Context, shown: List<Pair<Alarm, Long>>) {
+        runCatching {
+            val nm = nm(ctx)
+            val active = nm.activeNotifications.filter { it.id == SNOOZED_ID }
+            val want = shown.associateBy { it.first.id }
+            for (sb in active) if (sb.tag !in want) nm.cancel(sb.tag, SNOOZED_ID)
+            for ((id, p) in want) {
+                val (a, until) = p
+                val same = active.any {
+                    it.tag == id && it.notification.extras.getLong(EXTRA_UNTIL, -1) == until &&
+                        it.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() == a.label.ifEmpty { "Alarm" }
+                }
+                if (!same) nm.notify(id, SNOOZED_ID, snoozed(ctx, a, until))
+            }
+        }.onFailure { App.instance.log.log("warn", "snooze-notify-failed", "error" to it.toString()) }
+    }
+
+    private fun snoozed(ctx: Context, a: Alarm, until: Long): Notification {
+        // The Dismiss button names the snooze it ends, so an old one can't end a newer.
+        val dismiss = broadcast(ctx, ACTION_SNOOZE_DISMISS, a.id, until)
+        return Notification.Builder(ctx, SNOOZED)
             .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle("Snoozed until ${timeOf(ctx, until)}")
             .setContentText(a.label.ifEmpty { "Alarm" })
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .addExtras(android.os.Bundle().apply { putLong(EXTRA_UNTIL, until) })
             .setContentIntent(open(ctx))
-            .addAction(Notification.Action.Builder(null, "Dismiss", broadcast(ctx, ACTION_SNOOZE_DISMISS, a.id)).build())
+            .addAction(Notification.Action.Builder(null, "Dismiss", dismiss).build())
             .build()
-        runCatching { nm(ctx).notify(a.id, 3, n) }
     }
-
-    fun cancelSnoozed(ctx: Context, id: String) = nm(ctx).cancel(id, 3)
 
     /** The timer's ongoing notification, counting down by itself (system chronometer). */
     fun timer(ctx: Context) {

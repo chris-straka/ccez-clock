@@ -190,16 +190,13 @@ class RingService : Service() {
             app.log.log("info", "ring-end", "kind" to r.kind, "id" to r.alarmIds.joinToString().ifEmpty { null }, "how" to how, "rang_s" to (now - r.started) / 1000)
             for (id in r.alarmIds) {
                 val until = Schedule.snoozeUntil(now, app.alarms.get(id)?.snooze ?: r.snooze)
+                // Each of these reschedules, and the "Snoozed until" line follows (Scheduler).
                 when (how) {
-                    "snoozed" -> {
-                        app.alarms.snooze(id, until)
-                        app.alarms.get(id)?.let { Notifications.snoozed(this, it, until) }
-                    }
+                    "snoozed" -> app.alarms.snooze(id, until)
                     "dismissed" -> app.alarms.rang(id)
                     // Unanswered (gone quiet, cut short by the timer, the service
                     // stopped): it rings again a snooze later, as Samsung Clock does.
                     else -> app.alarms.unanswered(id, until, app.settings.int("alarm.ring_again"))
-                        ?.let { again -> app.alarms.get(id)?.let { Notifications.snoozed(this, it, again) } }
                 }
             }
         }

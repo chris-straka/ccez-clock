@@ -113,6 +113,26 @@ class AlarmStore(dir: File, private val log: ClockLog) {
         return until
     }
 
+    /**
+     * The shade's Dismiss on a "Snoozed until" line: ends that snooze only.
+     * A button left from an older snooze (or none now) changes nothing.
+     */
+    fun dismissSnooze(id: String, until: Long): Boolean {
+        if (synchronized(this) { snoozes[id] } != until) return false
+        rang(id)
+        return true
+    }
+
+    /**
+     * The "Snoozed until" lines the shade shows: each snooze still ahead of
+     * a live alarm, but not one that's ringing now (its retry is saved at
+     * the ring's start). Everything else is taken down.
+     */
+    @Synchronized fun shownSnoozes(ringing: Collection<String>, now: Long): List<Pair<Alarm, Long>> =
+        snoozes.mapNotNull { (id, until) ->
+            all[id]?.takeIf { until > now && id !in ringing && it.enabled && !it.deleted }?.let { it to until }
+        }
+
     /** After a ring ends by Dismiss (or the last unanswered one): no snooze, and a one-off alarm turns off. */
     fun rang(id: String) {
         val a = synchronized(this) {
