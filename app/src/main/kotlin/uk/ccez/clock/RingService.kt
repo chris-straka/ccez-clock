@@ -25,13 +25,26 @@ import kotlinx.coroutines.flow.StateFlow
 /** What's ringing now (the ring screen shows it; null: nothing). */
 data class Ring(
     val kind: String,
-    val alarmId: String?,
+    /** The alarms ringing together (two set for the same minute ring as one). */
+    val alarmIds: List<String>,
     val label: String,
     /** When it was due (ms). */
     val due: Long,
     val started: Long,
     val snooze: Int,
-)
+) {
+    val alarmId: String? get() = alarmIds.firstOrNull()
+
+    /** Another alarm due while this one rings: both ring on, both labels shown, one answer for both. */
+    fun join(other: Ring): Ring {
+        val added = other.alarmIds.filter { it !in alarmIds }
+        if (added.isEmpty()) return this
+        return copy(
+            alarmIds = alarmIds + added,
+            label = (label.split(" · ") + other.label).filter { it.isNotEmpty() }.distinct().joinToString(" · "),
+        )
+    }
+}
 
 /**
  * The ring: a foreground service that plays the sound on the alarm
@@ -60,7 +73,7 @@ class RingService : Service() {
                     Scheduler.scheduleAll(this, "stale")
                     stopIfIdle()
                 } else {
-                    begin(Ring("alarm", alarm.id, alarm.label, intent.getLongExtra(Scheduler.EXTRA_DUE, System.currentTimeMillis()), System.currentTimeMillis(), alarm.snooze), alarm.sound.ifEmpty { app.settings.text("alarm.sound") }, alarm.vibrate)
+                    begin(Ring("alarm", listOf(alarm.id), alarm.label, intent.getLongExtra(Scheduler.EXTRA_DUE, System.currentTimeMillis()), System.currentTimeMillis(), alarm.snooze), alarm.sound.ifEmpty { app.settings.text("alarm.sound") }, alarm.vibrate)
                 }
             }
             RING_TIMER -> {
@@ -74,7 +87,7 @@ class RingService : Service() {
                 } else {
                     val due = t.endsAt
                     app.timer.update("done") { s, n -> s.cancel(n) }
-                    begin(Ring("timer", null, "", due, now, 0), app.settings.text("timer.sound"), true)
+                    begin(Ring("timer", emptyList(), "", due, now, 0), app.settings.text("timer.sound"), true)
                 }
             }
             DISMISS -> end("dismissed")
@@ -106,7 +119,19 @@ class RingService : Service() {
 
     private fun begin(r: Ring, sound: String, vibrate: Boolean) {
         val app = App.instance
-        if (ringing.value != null) end("replaced", keepService = true)
+        val current = ringing.value
+        if (current != null && current.kind == "alarm" && r.kind == "alarm") {
+            // Two alarms in the same minute: one ring, both labels, one answer for both.
+            val joined = current.join(r)
+            ringing.value = joined
+            foreground(Notifications.ringing(this, joined))
+            r.alarmId?.let { app.alarms.ringing(it, retryAt(app, current.started, it)) }
+            app.log.log("info", "ring-joined", "id" to r.alarmId, "with" to current.alarmIds.joinToString(), "due" to Scheduler.iso(r.due), "late_ms" to (r.started - r.due))
+            Scheduler.scheduleAll(this, "rang")
+            return
+        }
+        // A timer and an alarm: the newer rings; an alarm cut short rings again later (end()).
+        if (current != null) end("replaced", keepService = true)
         foreground(Notifications.ringing(this, r))
         ringing.value = r
         // Screen off or locked: the full-screen intent opens the ring screen.
@@ -125,9 +150,14 @@ class RingService : Service() {
         if (player == null) fallbackTone()
         runCatching { if (vibrate) vibrate() }.onFailure { app.log.log("error", "vibrate-failed", "error" to it.toString()) }
         handler.postDelayed(autoStop, app.settings.int("alarm.ring_minutes") * 60_000L)
-        // The alarm's next ring (a repeating one's next day) goes in now.
+        // Killed mid-ring, it still rings again (and a one-off doesn't wait for tomorrow).
+        for (id in r.alarmIds) app.alarms.ringing(id, retryAt(app, r.started, id))
+        // The alarm's next ring (a repeating one's next day, or that retry) goes in now.
         Scheduler.scheduleAll(this, "rang")
     }
+
+    private fun retryAt(app: App, started: Long, id: String): Long =
+        Schedule.retryAt(started, app.settings.int("alarm.ring_minutes"), app.alarms.get(id)?.snooze ?: app.settings.int("alarm.snooze_minutes"))
 
     private var tone: android.media.Ringtone? = null
 
@@ -157,14 +187,19 @@ class RingService : Service() {
         if (r != null) {
             ringing.value = null
             val now = System.currentTimeMillis()
-            app.log.log("info", "ring-end", "kind" to r.kind, "id" to r.alarmId, "how" to how, "rang_s" to (now - r.started) / 1000)
-            if (r.kind == "alarm" && r.alarmId != null) {
-                if (how == "snoozed") {
-                    val until = Schedule.snoozeUntil(now, r.snooze)
-                    app.alarms.snooze(r.alarmId, until)
-                    app.alarms.get(r.alarmId)?.let { Notifications.snoozed(this, it, until) }
-                } else {
-                    app.alarms.rang(r.alarmId)
+            app.log.log("info", "ring-end", "kind" to r.kind, "id" to r.alarmIds.joinToString().ifEmpty { null }, "how" to how, "rang_s" to (now - r.started) / 1000)
+            for (id in r.alarmIds) {
+                val until = Schedule.snoozeUntil(now, app.alarms.get(id)?.snooze ?: r.snooze)
+                when (how) {
+                    "snoozed" -> {
+                        app.alarms.snooze(id, until)
+                        app.alarms.get(id)?.let { Notifications.snoozed(this, it, until) }
+                    }
+                    "dismissed" -> app.alarms.rang(id)
+                    // Unanswered (gone quiet, cut short by the timer, the service
+                    // stopped): it rings again a snooze later, as Samsung Clock does.
+                    else -> app.alarms.unanswered(id, until, app.settings.int("alarm.ring_again"))
+                        ?.let { again -> app.alarms.get(id)?.let { Notifications.snoozed(this, it, again) } }
                 }
             }
         }

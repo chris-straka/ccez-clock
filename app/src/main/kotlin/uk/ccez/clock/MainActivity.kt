@@ -103,6 +103,12 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val app = App.instance
         app.visible = true
+        // Ringing with the ring screen gone (a heads-up that collapsed, full-screen
+        // alarms off): opening the clock brings it back, so there's a way to stop it.
+        if (RingService.ringing.value != null) {
+            app.log.log("info", "ring-screen-reopened", "kind" to RingService.ringing.value?.kind)
+            runCatching { startActivity(Intent(this, RingActivity::class.java)) }
+        }
         // Self-healing: whatever happened while closed, the schedule is redone.
         app.scope.launch {
             Scheduler.scheduleAll(app, "open")
@@ -210,12 +216,19 @@ sealed class Page {
     val now = rememberNow(15_000)
     val h24 = DateFormat.is24HourFormat(LocalContext.current)
     val zNow = ZonedDateTime.now()
+    val ringing by RingService.ringing.collectAsState()
+    val ctx = LocalContext.current
+    val warnings = Health.warnings(rememberChecks(), app.settings.int("alarm.min_volume"))
     val next = alarms.mapNotNull { a -> Schedule.nextRing(a, snoozed[a.id], zNow)?.let { a to it } }.minByOrNull { it.second }
     Column(Modifier.fillMaxSize().testTag("alarm-tab")) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.weight(1f))
             GlyphButton(Glyph.PLUS, "Add alarm", { onEdit(null) }, Modifier.testTag("add"))
             GlyphButton(Glyph.MORE, "Settings", onSettings, Modifier.testTag("settings"))
+        }
+        // Anything on the phone that can keep an alarm from ringing, a tap from its fix.
+        for (c in warnings) {
+            ValueRow(c.label, "Off", { fixCheck(ctx, c.key) }, Modifier.padding(horizontal = 8.dp).testTag("warn-${c.key}"), valueColor = Palette.accent)
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp).semantics(mergeDescendants = true) { heading() }) {
             if (next != null) {
@@ -233,7 +246,8 @@ sealed class Page {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
         ) {
             items(alarms, key = { it.id }) { a ->
-                AlarmRow(a, snoozed[a.id]?.takeIf { it > now }, h24, onClick = { onEdit(a.id) }, onToggle = { app.alarms.setEnabled(a.id, it) })
+                // While it rings, its retry isn't a snooze to show.
+                AlarmRow(a, snoozed[a.id]?.takeIf { it > now && ringing?.alarmIds?.contains(a.id) != true }, h24, onClick = { onEdit(a.id) }, onToggle = { app.alarms.setEnabled(a.id, it) })
             }
         }
     }
@@ -289,7 +303,7 @@ sealed class Page {
 }
 
 /** A row in settings or the editor: a name, its value, tap to change. */
-@Composable fun ValueRow(title: String, value: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+@Composable fun ValueRow(title: String, value: String, onClick: () -> Unit, modifier: Modifier = Modifier, valueColor: Color = Palette.dim) {
     Row(
         modifier
             .fillMaxWidth()
@@ -302,7 +316,7 @@ sealed class Page {
     ) {
         Text(title, color = Palette.fg, fontSize = 17.sp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(12.dp))
-        Text(value, color = Palette.dim, fontSize = 17.sp)
+        Text(value, color = valueColor, fontSize = 17.sp)
     }
 }
 

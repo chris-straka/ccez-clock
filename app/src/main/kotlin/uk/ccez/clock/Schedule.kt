@@ -43,6 +43,23 @@ object Schedule {
 
     fun snoozeUntil(nowMs: Long, minutes: Int): Long = nowMs + minutes * 60_000L
 
+    /**
+     * Where a ring that started at [startedMs] rings again if it never ends
+     * (the process killed): when it would have gone quiet, plus a snooze.
+     */
+    fun retryAt(startedMs: Long, ringMinutes: Int, snoozeMinutes: Int): Long =
+        startedMs + ringMinutes * 60_000L + snoozeMinutes * 60_000L
+
+    /** How long a timer that's over can still ring (synced late, a reboot); older is missed. */
+    const val TIMER_LATE_MS = 10 * 60_000L
+
+    /** When to wake for a timer ending at [endsAt]: then, now when it's just over, or null when it's long missed. */
+    fun timerWake(endsAt: Long, nowMs: Long): Long? = when {
+        endsAt > nowMs -> endsAt
+        nowMs - endsAt < TIMER_LATE_MS -> nowMs
+        else -> null
+    }
+
     /** "In 7 h 30 min", "In 45 min", "In 2 days". Rounded up to the minute, as people read alarms. */
     fun untilText(now: ZonedDateTime, ring: ZonedDateTime): String {
         val secs = Duration.between(now, ring).seconds.coerceAtLeast(0)

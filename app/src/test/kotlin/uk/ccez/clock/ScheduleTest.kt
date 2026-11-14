@@ -128,4 +128,16 @@ class ScheduleTest {
         assertEquals(0 to 1, Schedule.resolveTime("+2", at(2026, 11, 12, 23, 59)))
         assertEquals(7 to 30, Schedule.resolveTime("7:30", at(2026, 11, 12, 6, 0)))
     }
+
+    @Test fun aRingThatNeverEndsRingsAgainASnoozeAfterItWouldHaveGoneQuiet() {
+        assertEquals(1_000L + 10 * 60_000 + 5 * 60_000, Schedule.retryAt(1_000, 10, 5))
+    }
+
+    @Test fun aTimerWakesAtItsEndOrNowWhenJustOver() {
+        assertEquals(5_000L, Schedule.timerWake(5_000, 1_000))
+        // Over by a few minutes (a late sync, a reboot): now.
+        assertEquals(200_000L, Schedule.timerWake(5_000, 200_000))
+        // Over by ten minutes or more: missed.
+        assertNull(Schedule.timerWake(5_000, 5_000 + Schedule.TIMER_LATE_MS))
+    }
 }

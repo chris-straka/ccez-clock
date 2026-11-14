@@ -65,14 +65,15 @@ object SettingDefs {
         Def("alarm.fade_seconds", Kind.IntRange(0, 120), 30, "Seconds an alarm takes to reach full volume (0: full at once)."),
         Def("alarm.vibrate", Kind.Bool, true, "New alarms vibrate."),
         Def("alarm.snooze_minutes", Kind.IntRange(1, 60), 10, "Snooze length for new alarms."),
-        Def("alarm.ring_minutes", Kind.IntRange(1, 30), 10, "An unanswered alarm stops after this many minutes."),
+        Def("alarm.ring_minutes", Kind.IntRange(1, 30), 10, "An unanswered alarm goes quiet after this many minutes, then rings again a snooze later (alarm.ring_again)."),
+        Def("alarm.ring_again", Kind.IntRange(0, 10), 3, "Times an unanswered alarm rings again, a snooze apart, before it counts as dismissed (0: never)."),
         Def("alarm.min_volume", Kind.IntRange(0, 100), 40, "While ringing, a lower alarm volume is raised to this percent (0: never)."),
         Def("timer.sound", Kind.Choice(Synth.SOUNDS), "marimba", "The timer's sound."),
         Def("timer.presets", Kind.Text, "1,3,5,10,15,30", "Timer presets, in minutes, comma-separated."),
         Def("sync.server", Kind.Text, BuildConfig.SYNC_SERVER, "The clock server on the tailnet. Empty: no sync."),
         Def("sync.device", Kind.Text, "", "This phone's name on the server (empty: the model)."),
         Def("sync.minutes", Kind.IntRange(0, 240), 30, "Wake to sync at least this often, even in deep sleep (0: only the 15-minute job and before each ring)."),
-        Def("updates.self", Kind.Bool, false, "Install new releases from GitHub by itself."),
+        Def("updates.self", Kind.Bool, true, "Install new releases from GitHub by itself."),
     )
 
     fun def(key: String): Def? = ALL.firstOrNull { it.key == key }
@@ -179,7 +180,23 @@ class ClockSettings(dir: File, private val log: ClockLog) {
         val text = runCatching { file.readText() }.getOrNull() ?: return
         val o = runCatching { JSONObject(text) }.getOrNull() ?: return log.log("warn", "settings-bad-file")
         for (d in SettingDefs.ALL) if (o.has(d.key)) runCatching { values[d.key] = SettingDefs.checked(d, o.get(d.key)) }
+        // Files before format 2 held every default, not only what was set:
+        // updates.self=false there was the old default, not a choice.
+        if (o.optInt(FORMAT, 1) < 2 && values["updates.self"] == false) {
+            values.remove("updates.self")
+            log.log("info", "settings-migrated", "dropped" to "updates.self")
+            save()
+        }
     }
 
-    private fun save() = writeSafely(file, toJson())
+    /** Only what was set, so a changed default reaches the phone. */
+    @Synchronized private fun save() {
+        val o = JSONObject().put(FORMAT, 2)
+        for (d in SettingDefs.ALL) values[d.key]?.let { o.put(d.key, it) }
+        writeSafely(file, o.toString(2))
+    }
+
+    private companion object {
+        const val FORMAT = "_format"
+    }
 }

@@ -42,11 +42,7 @@ import kotlinx.coroutines.launch
     val s = app.settings
     @Suppress("UNUSED_VARIABLE") val v by s.version.collectAsState()
     var dialog by remember { mutableStateOf<String?>(null) }
-    // The phone checks again each time the screen comes back (from system settings).
-    var checksVersion by remember { mutableIntStateOf(0) }
-    val owner = LocalLifecycleOwner.current
-    LaunchedEffect(owner) { owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { checksVersion++ } }
-    val checks = remember(checksVersion) { Health.checks(ctx) }
+    val checks = rememberChecks()
     val syncLast by Sync.last.collectAsState()
 
     Column(Modifier.fillMaxSize().testTag("settings-screen")) {
@@ -60,12 +56,13 @@ import kotlinx.coroutines.launch
             SwitchRow("Vibrate", s.bool("alarm.vibrate"), { s.set("alarm.vibrate", it.toString()) })
             ValueRow("Snooze", "${s.int("alarm.snooze_minutes")} min", { dialog = "alarm.snooze_minutes" })
             ValueRow("Ring for", "${s.int("alarm.ring_minutes")} min", { dialog = "alarm.ring_minutes" })
+            ValueRow("Ring again", times(s.int("alarm.ring_again")), { dialog = "alarm.ring_again" }, Modifier.testTag("ring-again"))
             ValueRow("Lowest volume", s.int("alarm.min_volume").let { if (it == 0) "Off" else "$it%" }, { dialog = "alarm.min_volume" })
             ValueRow("Timer sound", Synth.name(s.text("timer.sound")), { dialog = "timer.sound" })
             Gap(16)
             SectionTitle("Phone")
             for (c in checks) {
-                ValueRow(c.label, if (c.ok) "On" else "Off", { fix(ctx, c.key) }, Modifier.testTag("check-${c.key}"))
+                ValueRow(c.label, if (c.ok) "On" else "Off", { fixCheck(ctx, c.key) }, Modifier.testTag("check-${c.key}"), valueColor = if (c.ok) Palette.dim else Palette.accent)
             }
             Gap(16)
             SectionTitle("Sync")
@@ -95,13 +92,20 @@ import kotlinx.coroutines.launch
                 "alarm.fade_seconds" -> listOf(0, 10, 30, 60).map { it.toString() to if (it == 0) "Off" else "$it s" }
                 "alarm.snooze_minutes" -> listOf(5, 10, 15, 20, 30).map { it.toString() to "$it min" }
                 "alarm.ring_minutes" -> listOf(5, 10, 15, 30).map { it.toString() to "$it min" }
+                "alarm.ring_again" -> listOf(0, 1, 2, 3, 5, 10).map { it.toString() to times(it) }
                 "alarm.min_volume" -> listOf(0, 20, 40, 60, 80, 100).map { it.toString() to if (it == 0) "Off" else "$it%" }
                 else -> emptyList()
             }
-            val title = mapOf("alarm.fade_seconds" to "Fade in", "alarm.snooze_minutes" to "Snooze", "alarm.ring_minutes" to "Ring for", "alarm.min_volume" to "Lowest volume")[d] ?: d
+            val title = mapOf("alarm.fade_seconds" to "Fade in", "alarm.snooze_minutes" to "Snooze", "alarm.ring_minutes" to "Ring for", "alarm.ring_again" to "Ring again", "alarm.min_volume" to "Lowest volume")[d] ?: d
             ChoiceDialog(title, opts, s.get(d).toString(), onPick = { s.set(d, it); dialog = null }, onClose = { dialog = null })
         }
     }
+}
+
+private fun times(n: Int) = when (n) {
+    0 -> "Off"
+    1 -> "Once"
+    else -> "$n times"
 }
 
 @Composable private fun SectionTitle(t: String) =
@@ -119,8 +123,17 @@ import kotlinx.coroutines.launch
     )
 }
 
-/** Opens the system page that fixes [key] (the "Phone" rows). */
-private fun fix(ctx: android.content.Context, key: String) {
+/** The phone's checks, read again each time the screen comes back (from system settings). */
+@Composable fun rememberChecks(): List<Health.Check> {
+    val ctx = LocalContext.current
+    var checksVersion by remember { mutableIntStateOf(0) }
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(owner) { owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { checksVersion++ } }
+    return remember(checksVersion) { Health.checks(ctx) }
+}
+
+/** Opens the system page that fixes [key] (the "Phone" rows, the Alarm tab's warnings). */
+fun fixCheck(ctx: android.content.Context, key: String) {
     val pkg = Uri.parse("package:${ctx.packageName}")
     val i = when (key) {
         "exact_alarms" -> if (Build.VERSION.SDK_INT >= 31) Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg) else null

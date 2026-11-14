@@ -99,7 +99,13 @@ object Scheduler {
         return soonest
     }
 
-    /** The running timer's wake-up; a timer already over (synced late, a reboot) rings now if it's recent. */
+    /**
+     * The running timer's wake-up; a timer already over (synced late, a
+     * reboot) rings now if it's recent. Always through an exact wake-up,
+     * never by starting the ring here: from a sync job in the background,
+     * Android may refuse the foreground service, while an exact alarm's
+     * broadcast is allowed to start it.
+     */
     fun scheduleTimer(ctx: Context) {
         val app = App.instance
         val t = app.timer.state.value
@@ -109,15 +115,14 @@ object Scheduler {
             return
         }
         val now = System.currentTimeMillis()
-        if (t.endsAt <= now) {
-            if (now - t.endsAt < 10 * 60_000L) {
-                RingService.ringTimer(ctx)
-            } else {
-                app.timer.update("missed") { s, n -> s.cancel(n) }
-            }
+        val wake = Schedule.timerWake(t.endsAt, now)
+        if (wake == null) {
+            app.log.log("warn", "timer-missed", "ended" to iso(t.endsAt), "late_ms" to now - t.endsAt)
+            app.timer.update("missed") { s, n -> s.cancel(n) }
             return
         }
-        val at = app.timer.endsElapsed()
+        if (wake <= now) app.log.log("info", "timer-late", "ended" to iso(t.endsAt), "late_ms" to now - t.endsAt)
+        val at = android.os.SystemClock.elapsedRealtime() + (wake - now)
         if (canExact(ctx)) am(ctx).setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
         else am(ctx).setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
     }

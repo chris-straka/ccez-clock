@@ -91,7 +91,16 @@ object Sync {
                 }
                 val changed = app.alarms.applyRemote(remote)
                 res.optJSONObject("timer")?.let { t -> runCatching { app.timer.applyRemote(TimerState.parse(t)) } }
-                prefs.edit().putLong("seq", res.optLong("seq", since)).putLong("ok", System.currentTimeMillis()).apply()
+                val db = res.optLong("db", 0)
+                if (SyncCursor.newDatabase(prefs.getLong("db", 0), db)) {
+                    // The server's database was made anew: its count starts again
+                    // below this phone's cursor, and it has lost this phone's alarms.
+                    app.log.log("warn", "sync-new-server-db", "was" to prefs.getLong("db", 0), "now" to db, "seq" to since)
+                    prefs.edit().putLong("seq", 0).putLong("db", db).putLong("ok", System.currentTimeMillis()).apply()
+                    app.alarms.markAllDirty()
+                } else {
+                    prefs.edit().putLong("seq", res.optLong("seq", since)).putLong("db", db).putLong("ok", System.currentTimeMillis()).apply()
+                }
                 app.log.log("info", "sync", "why" to why, "sent" to alarms.size, "got" to remote.size, "changed" to changed, "timer_sent" to timerDirty, "ms" to System.currentTimeMillis() - started)
                 last.value = "ok"
                 true
@@ -121,7 +130,7 @@ object Sync {
             // The phone's own offset now: agents work out "+5 min" with it, whatever their time-zone rules say.
             .put("offset_min", java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000)
             .put("next", next?.let { Scheduler.iso(it) } ?: JSONObject.NULL)
-            .put("ringing", RingService.ringing.value?.let { JSONObject().put("kind", it.kind).put("id", it.alarmId) } ?: JSONObject.NULL)
+            .put("ringing", RingService.ringing.value?.let { JSONObject().put("kind", it.kind).put("id", it.alarmId).put("ids", JSONArray(it.alarmIds)) } ?: JSONObject.NULL)
             .put("health", Health.json(ctx))
             .put("settings", JSONObject(app.settings.toJson()))
     }
@@ -143,6 +152,12 @@ object Sync {
             .build()
         js.schedule(job)
     }
+}
+
+/** The sync cursor's rules, apart from the network (unit-tested). */
+object SyncCursor {
+    /** True when the server answered from another database than last time (0: not known yet). */
+    fun newDatabase(storedDb: Long, gotDb: Long): Boolean = storedDb != 0L && gotDb != 0L && storedDb != gotDb
 }
 
 class SyncJob : JobService() {
@@ -175,6 +190,14 @@ object Health {
             Check("alarm_volume", "Alarm volume on", audio.getStreamVolume(AudioManager.STREAM_ALARM) > 0),
         )
     }
+
+    /**
+     * The checks worth a line on the Alarm tab: anything off that can keep
+     * an alarm from ringing. A muted alarm volume isn't one while the ring
+     * raises it (`alarm.min_volume`).
+     */
+    fun warnings(checks: List<Check>, minVolume: Int): List<Check> =
+        checks.filter { !it.ok && !(it.key == "alarm_volume" && minVolume > 0) }
 
     fun json(ctx: Context): JSONObject = JSONObject().also { o ->
         for (c in checks(ctx)) o.put(c.key, c.ok)

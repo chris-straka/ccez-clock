@@ -109,7 +109,7 @@ class Control : ContentProvider() {
                 }
                 "dismiss", "stop" -> { RingService.send(app, RingService.DISMISS); "ok" }
                 "snooze" -> { RingService.send(app, RingService.SNOOZE); "ok" }
-                "ringing" -> RingService.ringing.value?.let { JSONObject().put("kind", it.kind).put("id", it.alarmId).put("label", it.label).toString() } ?: "none"
+                "ringing" -> RingService.ringing.value?.let { JSONObject().put("kind", it.kind).put("id", it.alarmId).put("ids", org.json.JSONArray(it.alarmIds)).put("label", it.label).toString() } ?: "none"
                 "sync" -> if (runBlocking { withTimeoutOrNull(25_000) { Sync.now(app, "adb") } } == true) "synced" else "sync failed (`clock.ts log`)"
                 "token" -> {
                     val f = java.io.File(app.safe.filesDir, "clock/token")

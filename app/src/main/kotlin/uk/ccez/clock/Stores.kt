@@ -1,6 +1,5 @@
 package uk.ccez.clock
 
-import android.os.SystemClock
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +15,8 @@ class AlarmStore(dir: File, private val log: ClockLog) {
     private val file = File(dir, "alarms.json")
     private val all = LinkedHashMap<String, Alarm>()
     private val snoozes = HashMap<String, Long>()
+    /** How many times in a row each alarm went unanswered (it rings again until `alarm.ring_again`). */
+    private val missed = HashMap<String, Int>()
     private val dirty = HashSet<String>()
 
     private val _alarms = MutableStateFlow<List<Alarm>>(emptyList())
@@ -32,15 +33,17 @@ class AlarmStore(dir: File, private val log: ClockLog) {
     @Synchronized fun get(id: String): Alarm? = all[id]?.takeIf { !it.deleted }
     @Synchronized fun everything(): List<Alarm> = all.values.toList()
     @Synchronized fun snoozedUntil(id: String): Long? = snoozes[id]
+    @Synchronized fun missedCount(id: String): Int = missed[id] ?: 0
     @Synchronized fun dirtyAlarms(): List<Alarm> = dirty.mapNotNull { all[it] }
 
     /** A change made here (the screen, adb): stamped now, owed to the server. */
     fun put(alarm: Alarm, why: String = "edit"): Alarm {
         val a = alarm.copy(at = System.currentTimeMillis().coerceAtLeast(alarm.at + 1))
         synchronized(this) {
+            val before = all[a.id]
             all[a.id] = a
             dirty += a.id
-            if (!a.enabled || a.deleted) snoozes.remove(a.id)
+            if (snoozeEnds(before, a)) forget(a.id)
             save()
         }
         log.log("info", "alarm-$why", "id" to a.id, "time" to "%02d:%02d".format(a.hour, a.minute), "days" to a.days.size, "enabled" to a.enabled)
@@ -60,37 +63,98 @@ class AlarmStore(dir: File, private val log: ClockLog) {
         return put(a.copy(enabled = on), if (on) "enable" else "disable")
     }
 
+    /** Snoozed by the person: rings at [until], and the unanswered count starts over. */
     fun snooze(id: String, until: Long) {
         synchronized(this) {
             snoozes[id] = until
+            missed.remove(id)
             save()
         }
         onChange("snooze")
     }
 
-    /** After a ring ends by Dismiss or silence: no snooze, and a one-off alarm turns off. */
+    /**
+     * A ring starts: if it never ends properly (the process killed mid-ring),
+     * it rings again at [retryAt] instead of being lost, and a one-off
+     * alarm doesn't wait for tomorrow. The caller reschedules.
+     */
+    fun ringing(id: String, retryAt: Long) {
+        synchronized(this) {
+            if (all[id]?.deleted != false) return
+            snoozes[id] = retryAt
+            save()
+        }
+    }
+
+    /**
+     * Nobody answered: it rings again at [until] (Samsung Clock's snooze
+     * repeats), at most [max] times in a row; after that it's done as if
+     * dismissed. Returns when it rings again, or null when it's done.
+     */
+    fun unanswered(id: String, until: Long, max: Int): Long? {
+        val again = synchronized(this) {
+            val a = all[id]
+            val n = missed[id] ?: 0
+            if (a == null || a.deleted || !a.enabled || n >= max) {
+                false
+            } else {
+                missed[id] = n + 1
+                snoozes[id] = until
+                save()
+                true
+            }
+        }
+        if (!again) {
+            rang(id)
+            return null
+        }
+        log.log("info", "alarm-unanswered", "id" to id, "count" to missedCount(id), "of" to max, "again_ms" to until)
+        onChange("unanswered")
+        return until
+    }
+
+    /** After a ring ends by Dismiss (or the last unanswered one): no snooze, and a one-off alarm turns off. */
     fun rang(id: String) {
         val a = synchronized(this) {
-            snoozes.remove(id)
+            forget(id)
             save()
             all[id]
         } ?: return
         if (!a.repeats && a.enabled && !a.deleted) put(a.copy(enabled = false), "done") else onChange("done")
     }
 
+    /** Every alarm owed to the server again (its database was made anew). */
+    fun markAllDirty() {
+        synchronized(this) {
+            dirty += all.keys
+            save()
+        }
+        log.log("warn", "alarms-resend", "count" to all.size)
+        onChange("resend")
+    }
+
+    private fun forget(id: String) {
+        snoozes.remove(id)
+        missed.remove(id)
+    }
+
     /**
-     * Alarms from the server: each taken where it's newer than ours.
-     * Returns how many changed here.
+     * Alarms from the server. The server has already settled who won, so
+     * its copy is taken whenever this phone owes it nothing for that alarm
+     * (the server's clock stamps `at`, so a phone clock running ahead can't
+     * keep an agent's later change out). An alarm changed here and not yet
+     * sent is only replaced by a newer one. Returns how many changed here.
      */
     fun applyRemote(remote: List<Alarm>): Int {
         var n = 0
         synchronized(this) {
             for (r in remote) {
                 val mine = all[r.id]
-                if (mine == null || r.at > mine.at) {
+                val take = mine == null || r.at > mine.at || (r.id !in dirty && r != mine)
+                if (take) {
                     all[r.id] = r
                     dirty -= r.id
-                    if (!r.enabled || r.deleted) snoozes.remove(r.id)
+                    if (snoozeEnds(mine, r)) forget(r.id)
                     n++
                 }
             }
@@ -127,6 +191,7 @@ class AlarmStore(dir: File, private val log: ClockLog) {
                 dirty += a.id
             }
             snoozes.clear()
+            missed.clear()
             save()
         }
         onChange("restore")
@@ -145,6 +210,7 @@ class AlarmStore(dir: File, private val log: ClockLog) {
                 val a = o.optJSONArray("alarms") ?: JSONArray()
                 for (i in 0 until a.length()) runCatching { Alarm.parse(a.getJSONObject(i)) }.onSuccess { all[it.id] = it }
                 o.optJSONObject("snoozes")?.let { s -> for (k in s.keys()) snoozes[k] = s.getLong(k) }
+                o.optJSONObject("missed")?.let { s -> for (k in s.keys()) missed[k] = s.getInt(k) }
                 o.optJSONArray("dirty")?.let { d -> for (i in 0 until d.length()) dirty += d.getString(i) }
             }.onFailure { log.log("error", "alarms-bad-file", "error" to it.toString()) }
         }
@@ -155,11 +221,21 @@ class AlarmStore(dir: File, private val log: ClockLog) {
         val o = JSONObject()
             .put("alarms", JSONArray(all.values.map { it.toJson() }))
             .put("snoozes", JSONObject(snoozes as Map<*, *>))
+            .put("missed", JSONObject(missed as Map<*, *>))
             .put("dirty", JSONArray(dirty.toList()))
         writeSafely(file, o.toString(2))
         publish()
     }
 }
+
+/**
+ * A snooze (and the unanswered count) ends when the alarm is turned off,
+ * deleted, or moved to another time or other days: the old snooze would
+ * ring at a time that's no longer wanted.
+ */
+internal fun snoozeEnds(before: Alarm?, after: Alarm): Boolean =
+    !after.enabled || after.deleted ||
+        (before != null && (before.hour != after.hour || before.minute != after.minute || before.days != after.days))
 
 /** The timer, with the elapsed-time clock it's scheduled against. */
 class TimerStore(dir: File, private val log: ClockLog) {
@@ -211,12 +287,6 @@ class TimerStore(dir: File, private val log: ClockLog) {
             dirty = false
             save()
         }
-    }
-
-    /** When it rings on the elapsed-time clock (immune to clock changes while up). */
-    fun endsElapsed(): Long {
-        val s = _state.value
-        return SystemClock.elapsedRealtime() + (s.endsAt - System.currentTimeMillis())
     }
 
     private fun save() = writeSafely(file, JSONObject().put("timer", _state.value.toJson()).put("dirty", dirty).toString())
