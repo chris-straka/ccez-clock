@@ -51,6 +51,10 @@ the spec; update it as you learn.
   killed mid-ring) rings again the same way: the retry is saved when the
   ring starts. Two alarms in the same minute ring as one, both labels
   shown, one answer for both; an alarm cut short by the timer rings again.
+  A "Snoozed until" line in the shade shows each snooze or re-ring still
+  ahead and follows the alarms (Scheduler), so it goes when the snooze
+  rings, the re-rings run out, or the alarm is dismissed or moved; its
+  Dismiss ends only the snooze it names.
 - Opening the app while something rings brings the ring screen back. The
   Alarm tab shows a line for any phone check that's off (below), a tap
   from its fix.
@@ -137,7 +141,9 @@ checks and the phone's own settings.
   owes nothing for (the server stamps times by its own clock, so a phone
   clock running ahead can't keep an agent's change out). The sync answer
   names the server's database; when that changes (the file made anew)
-  the phone starts its cursor over and sends every alarm again.
+  the phone starts its cursor over and sends every alarm again; in that
+  answer the server's copy wins only where it's newer (the new file may
+  be an older copy).
 - CLI: `bun scripts/clock.ts list|add|edit|delete|enable|disable|timer|phone`
   over HTTP (server from `CLOCK_SERVER`, `~/.config/ccez-clock/server`, or
   z's address). `add 07:30 weekdays --label Gym`, `add +20`, `timer 25m`.
@@ -197,6 +203,24 @@ World clock, bedtime, multiple timers, alarm sound downloads or custom
 ringtones, Samsung's look.
 
 ## Status
+
+2026-11-14: released v0.1.35 (APK 1,244 KB), fixing a review of v0.1.29
+(also 1,244 KB, released untested on a device): "Snoozed until" lines
+never went away (now they follow the alarms, and a stale Dismiss can't
+end a newer snooze); a server database replaced by an older copy could
+overwrite newer alarms on the phone (now only newer server copies win in
+that answer); settings files from v0.1.23 and v0.1.29 kept every old
+default as if chosen (now those are dropped once, file format 3, so
+later default changes reach the phone; sync.server is always kept);
+release.sh found the SDK only after its test gate, and a fresh clone
+stopped it (checked in a fresh clone: the gate failed before, passes
+now). Verified by unit tests (37) and server tests (8). Not verified:
+the ring path changed in v0.1.29 and this release (re-rings, joined
+rings, the ring screen reopening, shade lines, glyph buttons) has not
+run on an emulator or the S24 (no emulator for this pass): run
+`scripts/check.sh` on clock_avd before trusting it, and walk a missed
+alarm's re-rings there. The phone still has v0.1.23 (self-update off),
+so it needs v0.1.35 installed once by hand.
 
 2026-11-14: fixed the review of v0.1.23 (the version on the owner's
 phone). An unanswered alarm now rings again (3 times, a snooze apart)
