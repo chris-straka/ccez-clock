@@ -126,6 +126,86 @@ class StoreTest {
         assertFalse(SyncCursor.newDatabase(1_700_000_000_000, 0))
     }
 
+    @Test fun theSnoozedLineGoesWhenTheSnoozeIsOver() {
+        val s = store()
+        val a = s.put(Alarm("wecker", 7, 0, label = "Wecker"), "add")
+        // Slept through: it rings again at 07:20, and the shade says so.
+        s.ringing(a.id, 20_000)
+        assertTrue(s.shownSnoozes(listOf(a.id), 1_000).isEmpty())
+        s.unanswered(a.id, 20_000, 3)
+        assertEquals(listOf(a.id to 20_000L), s.shownSnoozes(emptyList(), 1_000).map { it.first.id to it.second })
+        // Ringing again: the line goes.
+        s.ringing(a.id, 40_000)
+        assertTrue(s.shownSnoozes(listOf(a.id), 20_000).isEmpty())
+        s.unanswered(a.id, 40_000, 3)
+        s.unanswered(a.id, 60_000, 3)
+        // The re-rings run out: nothing left in the shade.
+        assertNull(s.unanswered(a.id, 80_000, 3))
+        assertTrue(s.shownSnoozes(emptyList(), 60_000).isEmpty())
+        // Moving a snoozed alarm takes its line down too.
+        val b = s.put(Alarm("kusuri", 21, 0, setOf(DayOfWeek.MONDAY), label = "薬"), "add")
+        s.snooze(b.id, 90_000)
+        assertEquals(1, s.shownSnoozes(emptyList(), 1_000).size)
+        s.put(s.get(b.id)!!.copy(minute = 30))
+        assertTrue(s.shownSnoozes(emptyList(), 1_000).isEmpty())
+        // So does a snooze already past.
+        s.snooze(b.id, 90_000)
+        assertTrue(s.shownSnoozes(emptyList(), 90_000).isEmpty())
+    }
+
+    @Test fun anOldDismissButtonLeavesANewerSnoozeAlone() {
+        val s = store()
+        val a = s.put(Alarm("naoling", 6, 45, setOf(DayOfWeek.FRIDAY), label = "闹铃"), "add")
+        s.snooze(a.id, 10_000)
+        s.snooze(a.id, 20_000)
+        assertFalse(s.dismissSnooze(a.id, 10_000))
+        assertEquals(20_000L, s.snoozedUntil(a.id))
+        assertTrue(s.dismissSnooze(a.id, 20_000))
+        assertNull(s.snoozedUntil(a.id))
+        assertTrue(s.get(a.id)!!.enabled)
+    }
+
+    @Test fun anOlderServerDatabaseDoesntWinOverThePhone() {
+        val s = store()
+        val mine = s.put(Alarm("travail", 7, 15, label = "Travail"), "add")
+        s.pushed(listOf(mine))
+        // The server's file came back from an older copy: its version of the alarm is older.
+        val restored = mine.copy(hour = 5, at = mine.at - 3_600_000)
+        val unknown = Alarm("neu", 8, 0, label = "Neu", at = mine.at - 3_600_000)
+        assertEquals(1, s.applyRemote(listOf(restored, unknown), serverSettled = false))
+        assertEquals(7, s.get(mine.id)!!.hour)
+        assertEquals("Neu", s.get("neu")!!.label)
+        // A newer copy still wins.
+        assertEquals(1, s.applyRemote(listOf(mine.copy(hour = 6, at = mine.at + 1)), serverSettled = false))
+        assertEquals(6, s.get(mine.id)!!.hour)
+    }
+
+    @Test fun oldSettingsFilesKeepOnlyWhatWasChosen() {
+        // v0.1.23 wrote every setting, defaults included.
+        val old = JSONObject()
+            .put("alarm.sound", "dawn").put("alarm.fade_seconds", 30).put("alarm.vibrate", true)
+            .put("alarm.snooze_minutes", 10).put("alarm.ring_minutes", 10).put("alarm.min_volume", 40)
+            .put("timer.sound", "marimba").put("timer.presets", "1,3,5,10,15,30")
+            .put("sync.server", "http://horloge.example:8799").put("sync.device", "").put("sync.minutes", 30)
+            .put("updates.self", false)
+        File(dir, "settings.json").writeText(old.toString())
+        val s = ClockSettings(dir, log)
+        assertEquals("dawn", s.text("alarm.sound"))
+        assertEquals(10, s.int("alarm.ring_minutes"))
+        assertTrue(s.bool("updates.self"))
+        val saved = JSONObject(File(dir, "settings.json").readText())
+        assertEquals(setOf("_format", "alarm.sound", "sync.server"), saved.keys().asSequence().toSet())
+        // v0.1.29 (format 2) kept the old defaults as if chosen; updates.self=false there was chosen.
+        File(dir, "settings.json").writeText(JSONObject().put("_format", 2).put("alarm.min_volume", 40).put("updates.self", false).put("alarm.fade_seconds", 45).toString())
+        ClockSettings(dir, log)
+        val two = JSONObject(File(dir, "settings.json").readText())
+        assertEquals(setOf("_format", "updates.self", "alarm.fade_seconds"), two.keys().asSequence().toSet())
+        // Today's files are taken as they are.
+        File(dir, "settings.json").writeText(JSONObject().put("_format", 3).put("alarm.min_volume", 40).toString())
+        ClockSettings(dir, log)
+        assertTrue(JSONObject(File(dir, "settings.json").readText()).has("alarm.min_volume"))
+    }
+
     @Test fun selfUpdateIsOnUnlessChosenOff() {
         assertEquals(true, ClockSettings(dir, log).bool("updates.self"))
         // An old file held every default, the old updates.self=false among them: not a choice.
