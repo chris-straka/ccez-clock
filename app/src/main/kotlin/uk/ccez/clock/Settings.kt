@@ -65,8 +65,10 @@ object SettingDefs {
         Def("alarm.fade_seconds", Kind.IntRange(0, 120), 30, "Seconds an alarm takes to reach full volume (0: full at once)."),
         Def("alarm.vibrate", Kind.Bool, true, "New alarms vibrate."),
         Def("alarm.snooze_minutes", Kind.IntRange(1, 60), 10, "Snooze length for new alarms."),
-        Def("alarm.ring_minutes", Kind.IntRange(1, 30), 10, "An unanswered alarm goes quiet after this many minutes, then rings again a snooze later (alarm.ring_again)."),
-        Def("alarm.ring_again", Kind.IntRange(0, 10), 3, "Times an unanswered alarm rings again, a snooze apart, before it counts as dismissed (0: never)."),
+        Def("alarm.ring_minutes", Kind.IntRange(1, 30), 10, "An unanswered alarm goes quiet after this many minutes, then rings again (alarm.ring_again_minutes later)."),
+        Def("alarm.ring_again", Kind.IntRange(0, 10), 3, "Times an unanswered alarm rings again before it counts as dismissed (0: never)."),
+        // Owner, 2026-11-14: 5 minutes apart, as Samsung Clock does.
+        Def("alarm.ring_again_minutes", Kind.IntRange(1, 60), 5, "Minutes between an unanswered alarm going quiet and ringing again."),
         Def("alarm.min_volume", Kind.IntRange(0, 100), 40, "While ringing, a lower alarm volume is raised to this percent (0: never)."),
         Def("timer.sound", Kind.Choice(Synth.SOUNDS), "marimba", "The timer's sound."),
         Def("timer.presets", Kind.Text, "1,3,5,10,15,30", "Timer presets, in minutes, comma-separated."),

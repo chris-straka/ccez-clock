@@ -45,7 +45,7 @@ the spec; update it as you learn.
   sound on the alarm stream (`USAGE_ALARM`, so Do not disturb lets it
   through by default) with a fade-in, vibrates when the alarm says so, and
   goes quiet after `alarm.ring_minutes`.
-- Unanswered, an alarm rings again a snooze later, `alarm.ring_again`
+- Unanswered, an alarm rings again 5 minutes later (`alarm.ring_again_minutes`, owner 2026-11-14, as Samsung), `alarm.ring_again`
   times (3) in a row, as Samsung Clock does; only then it counts as
   dismissed (a one-off turns off). A ring that never ends (the process
   killed mid-ring) rings again the same way: the retry is saved when the

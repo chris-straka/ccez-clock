@@ -45,10 +45,11 @@ object Schedule {
 
     /**
      * Where a ring that started at [startedMs] rings again if it never ends
-     * (the process killed): when it would have gone quiet, plus a snooze.
+     * (the process killed): when it would have gone quiet, plus the gap
+     * before ringing again (alarm.ring_again_minutes).
      */
-    fun retryAt(startedMs: Long, ringMinutes: Int, snoozeMinutes: Int): Long =
-        startedMs + ringMinutes * 60_000L + snoozeMinutes * 60_000L
+    fun retryAt(startedMs: Long, ringMinutes: Int, againMinutes: Int): Long =
+        startedMs + ringMinutes * 60_000L + againMinutes * 60_000L
 
     /** How long a timer that's over can still ring (synced late, a reboot); older is missed. */
     const val TIMER_LATE_MS = 10 * 60_000L

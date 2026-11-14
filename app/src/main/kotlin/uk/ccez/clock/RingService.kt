@@ -157,7 +157,7 @@ class RingService : Service() {
     }
 
     private fun retryAt(app: App, started: Long, id: String): Long =
-        Schedule.retryAt(started, app.settings.int("alarm.ring_minutes"), app.alarms.get(id)?.snooze ?: app.settings.int("alarm.snooze_minutes"))
+        Schedule.retryAt(started, app.settings.int("alarm.ring_minutes"), app.settings.int("alarm.ring_again_minutes"))
 
     private var tone: android.media.Ringtone? = null
 
@@ -195,8 +195,9 @@ class RingService : Service() {
                     "snoozed" -> app.alarms.snooze(id, until)
                     "dismissed" -> app.alarms.rang(id)
                     // Unanswered (gone quiet, cut short by the timer, the service
-                    // stopped): it rings again a snooze later, as Samsung Clock does.
-                    else -> app.alarms.unanswered(id, until, app.settings.int("alarm.ring_again"))
+                    // stopped): it rings again 5 minutes later (alarm.ring_again_minutes),
+                    // as Samsung Clock does (owner, 2026-11-14).
+                    else -> app.alarms.unanswered(id, Schedule.snoozeUntil(now, app.settings.int("alarm.ring_again_minutes")), app.settings.int("alarm.ring_again"))
                 }
             }
         }

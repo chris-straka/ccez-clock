@@ -96,7 +96,7 @@ import kotlinx.coroutines.launch
                 "alarm.min_volume" -> listOf(0, 20, 40, 60, 80, 100).map { it.toString() to if (it == 0) "Off" else "$it%" }
                 else -> emptyList()
             }
-            val title = mapOf("alarm.fade_seconds" to "Fade in", "alarm.snooze_minutes" to "Snooze", "alarm.ring_minutes" to "Ring for", "alarm.ring_again" to "Ring again", "alarm.min_volume" to "Lowest volume")[d] ?: d
+            val title = mapOf("alarm.fade_seconds" to "Fade in", "alarm.snooze_minutes" to "Snooze", "alarm.ring_minutes" to "Ring for", "alarm.ring_again" to "Ring again", "alarm.ring_again_minutes" to "Ring again after", "alarm.min_volume" to "Lowest volume")[d] ?: d
             ChoiceDialog(title, opts, s.get(d).toString(), onPick = { s.set(d, it); dialog = null }, onClose = { dialog = null })
         }
     }

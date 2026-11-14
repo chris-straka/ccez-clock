@@ -133,6 +133,12 @@ class ScheduleTest {
         assertEquals(1_000L + 10 * 60_000 + 5 * 60_000, Schedule.retryAt(1_000, 10, 5))
     }
 
+    @Test fun anUnansweredAlarmRingsAgainFiveMinutesLater() {
+        // Owner, 2026-11-14: 5 minutes apart, as Samsung Clock does.
+        assertEquals(5, SettingDefs.ALL.first { it.key == "alarm.ring_again_minutes" }.default)
+        assertEquals(1_000L + 5 * 60_000, Schedule.snoozeUntil(1_000, 5))
+    }
+
     @Test fun aTimerWakesAtItsEndOrNowWhenJustOver() {
         assertEquals(5_000L, Schedule.timerWake(5_000, 1_000))
         // Over by a few minutes (a late sync, a reboot): now.
