@@ -7,6 +7,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -z "$(git status --porcelain)" ] || { echo "commit first" >&2; exit 1; }
+# The SDK, before any gradle call: local.properties, else ANDROID_HOME,
+# else where Android Studio puts it (a fresh clone has neither file nor variable).
+SDK="${ANDROID_HOME:-$(sed -n 's/^sdk.dir=//p' local.properties 2>/dev/null)}"
+export ANDROID_HOME="${SDK:-$HOME/Library/Android/sdk}"
 (cd server && cargo test -q)
 ./gradlew --console=plain -q :app:testDebugUnitTest
 scripts/build.sh
@@ -21,9 +25,7 @@ cp "$APK" "$OUT/ccez-clock-$TAG.apk"
 SIZE="$(( $(stat -f%z "$APK") / 1024 )) KB"
 if gh release view "$TAG" >/dev/null 2>&1; then echo "$TAG is released: commit something new first" >&2; exit 1; fi
 # Signed by the same key as the last release, or the phone can't update.
-SDK="${ANDROID_HOME:-$(sed -n 's/^sdk.dir=//p' local.properties 2>/dev/null)}"
-SDK="${SDK:-$HOME/Library/Android/sdk}"
-APKSIGNER="$(ls "$SDK"/build-tools/*/apksigner | sort -t/ -k1 | tail -1)"
+APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -t/ -k1 | tail -1)"
 cert() { "$APKSIGNER" verify --print-certs "$1" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1; }
 LAST="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
 if [ -n "$LAST" ]; then
