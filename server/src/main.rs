@@ -165,7 +165,14 @@ pub fn open(path: &str) -> rusqlite::Result<Connection> {
          CREATE TABLE IF NOT EXISTS phone (device TEXT PRIMARY KEY, data TEXT NOT NULL, seen INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL);",
     )?;
+    // This database's id: a phone whose cursor came from another one (the
+    // file made anew) starts over and sends its alarms again.
+    db.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('db', ?1)", params![now_ms()])?;
     Ok(db)
+}
+
+pub fn db_id(db: &Connection) -> rusqlite::Result<i64> {
+    db.query_row("SELECT v FROM meta WHERE k = 'db'", [], |r| r.get(0))
 }
 
 fn now_ms() -> i64 {
@@ -222,10 +229,13 @@ pub fn apply_at(db: &mut Connection, alarms: Vec<Alarm>, now: i64) -> rusqlite::
     Ok(kept)
 }
 
-/// Alarms changed after [since] (tombstones too), and the `since` to send next.
+/// Alarms changed after [since] (tombstones too, everything when [since]
+/// is past this database's count), and the `since` to send next.
 pub fn changes(db: &mut Connection, since: i64) -> rusqlite::Result<(Vec<Alarm>, i64)> {
     let tx = db.transaction()?;
     let seq = last_seq(&tx)?;
+    // A cursor past this database's count came from an older database: everything.
+    let since = if since > seq { 0 } else { since };
     let list = {
         let mut q = tx.prepare("SELECT data FROM alarms WHERE seq > ?1 ORDER BY seq")?;
         q.query_map(params![since], |r| r.get::<_, String>(0))?
@@ -404,7 +414,8 @@ async fn sync(State(c): State<Ctx>, Json(body): Json<SyncIn>) -> Result<Json<Val
     }
     let (alarms, seq) = changes(&mut db, body.since)?;
     let t = timer(&db)?;
-    Ok(Json(json!({ "alarms": alarms, "seq": seq, "timer": t })))
+    let id = db_id(&db)?;
+    Ok(Json(json!({ "alarms": alarms, "seq": seq, "timer": t, "db": id })))
 }
 
 async fn auth(State(c): State<Ctx>, req: Request, next: Next) -> Response {
@@ -508,6 +519,40 @@ mod tests {
         assert_eq!(kept[0].at, 1000);
         apply_at(&mut c, vec![alarm("a", "06:00", 1001)], 2000).unwrap();
         assert_eq!(changes(&mut c, 0).unwrap().0[0].time, "06:00");
+    }
+
+    #[test]
+    fn a_cursor_from_an_older_database_gets_everything() {
+        let db = mem();
+        let mut c = lock(&db);
+        apply_at(&mut c, vec![alarm("a", "07:00", 100), alarm("b", "08:00", 100)], 1000).unwrap();
+        // A phone that synced with a database since made anew holds a cursor past this one's count.
+        let (list, seq) = changes(&mut c, 500).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(seq, 2);
+        assert!(changes(&mut c, seq).unwrap().0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_sync_names_its_database() {
+        let path = std::env::temp_dir().join(format!("ccez-clock-test-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let first = db_id(&open(path.to_str().unwrap()).unwrap()).unwrap();
+        // The same file keeps its id.
+        assert_eq!(db_id(&open(path.to_str().unwrap()).unwrap()).unwrap(), first);
+        let db: Db = Arc::new(Mutex::new(open(path.to_str().unwrap()).unwrap()));
+        let (_, v) = call(&db, "POST", "/sync", Some(json!({ "since": 0 }))).await;
+        assert_eq!(v["db"].as_i64(), Some(first));
+        drop(db);
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+        }
+        // A new file is another database.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert_ne!(db_id(&open(path.to_str().unwrap()).unwrap()).unwrap(), first);
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+        }
     }
 
     #[test]
